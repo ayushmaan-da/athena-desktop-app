@@ -1,0 +1,12 @@
+{
+  "name": "athena-desktop-app",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "electron": "electron ./electron/main.js"
+  }
+}
