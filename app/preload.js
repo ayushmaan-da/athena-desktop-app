@@ -18,6 +18,13 @@ contextBridge.exposeInMainWorld("athena", {
     },
     stopTimerOnMain: () => ipcRenderer.invoke('stop-timer'),
     setExamKioskOnMain: (enabled) => ipcRenderer.invoke('set-exam-kiosk', enabled),
+    respondToQuitConfirmation: (shouldQuit) =>
+        ipcRenderer.invoke('respond-to-quit-confirmation', shouldQuit),
+    registerListenerForQuitConfirmation: (callback) => {
+        const fn = () => callback();
+        ipcRenderer.on('quit-confirmation-requested', fn);
+        return () => ipcRenderer.removeListener('quit-confirmation-requested', fn);
+    },
     loadExamQuestions: () => ipcRenderer.invoke('load-exam-questions'),
     createExamSession: (student) => ipcRenderer.invoke('create-exam-session', student),
     submitExam: (submission) => ipcRenderer.invoke('submit-exam', submission),

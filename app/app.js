@@ -6,13 +6,13 @@ import { platform } from "os";
 import path from "path";
 import fs from "fs";
 
-let electronWindow = null, startTimestamp = null;
-let timer = null, cameraTimer = null, activeSessionId = null;
+let win, startTime, timer, cameraTimer, activeSessionId = null;
+let quitConfirmationOpen = false;
 let storageFolder = path.join(import.meta.dirname, "user-camera-snap");
 
-const dataFolder = path.resolve(import.meta.dirname, "../data");
-const questionsFile = path.join(dataFolder, "questions.json");
-const sessionsFile = path.join(dataFolder, "sessions.json");
+const data = path.resolve(import.meta.dirname, "../data");
+const questionsFile = path.join(data, "questions.json");
+const sessionsFile = path.join(data, "sessions.json");
 
 fs.mkdirSync(storageFolder, { recursive: true });
 
@@ -27,52 +27,56 @@ const readJSON = async (file, fallback) => {
 
 const readQuestions = () => readJSON(questionsFile);
 const readSessions = () => readJSON(sessionsFile, []);
-const writeSessions = sessions => fs.promises.writeFile(
-    sessionsFile, JSON.stringify(sessions, null, 2)
-);
+const writeSessions = s =>
+    fs.promises.writeFile(sessionsFile, JSON.stringify(s, null, 2));
 
 function stopMonitoring() {
     clearInterval(timer);
     clearInterval(cameraTimer);
-    timer = cameraTimer = startTimestamp = null;
+    timer = cameraTimer = startTime = null;
 }
 
 function createWindow() {
-    electronWindow = new BrowserWindow({
-        height: 1000,
+    win = new BrowserWindow({
         width: 1000,
+        height: 1000,
         webPreferences: {
             devTools: true,
             preload: path.join(import.meta.dirname, "preload.js")
         }
     });
 
-    electronWindow.on("closed", () => {
+    win.on("closed", () => {
         stopMonitoring();
-        electronWindow = null;
+        win = null;
     });
 
-    electronWindow.webContents.on("before-input-event", (_event, input) => {
-        if (
-            platform() === "darwin" &&
-            input.type === "keyDown" &&
-            input.meta &&
-            input.key.toLowerCase() === "q"
-        ) {
-            app.quit();
+    win.webContents.on("before-input-event", (event, input) => {
+        if (platform() === "darwin" && input.type === "keyDown" &&
+            input.meta && input.key.toLowerCase() === "q") {
+            event.preventDefault();
+            if (!quitConfirmationOpen && win && !win.isDestroyed()) {
+                quitConfirmationOpen = true;
+                win.webContents.send("quit-confirmation-requested");
+            }
         }
     });
 
-    electronWindow.loadURL("http://localhost:5173");
+    win.loadURL("http://localhost:5173");
 }
 
-ipcMain.handle("set-exam-kiosk", (_event, enabled) => {
-    if (typeof enabled !== "boolean" || !electronWindow || electronWindow.isDestroyed()) {
+ipcMain.handle("set-exam-kiosk", (_e, enabled) => {
+    if (typeof enabled !== "boolean" || !win || win.isDestroyed())
         throw new Error("Invalid kiosk mode request.");
-    }
+    win.setKiosk(enabled);
+    return win.isKiosk();
+});
 
-    electronWindow.setKiosk(enabled);
-    return electronWindow.isKiosk();
+ipcMain.handle("respond-to-quit-confirmation", (_e, quit) => {
+    if (typeof quit !== "boolean") throw new Error("Invalid response.");
+    quitConfirmationOpen = false;
+    if (quit) app.quit();
+    return true;
 });
 
 ipcMain.handle("load-exam-questions", async () =>
@@ -83,23 +87,17 @@ ipcMain.handle("load-exam-questions", async () =>
 
 ipcMain.handle("create-exam-session", async () => {
     const sessions = await readSessions();
-    const userId = 1;
-    const name = "Student";
-
     const existing = sessions.find(s =>
-        s.sessionId === activeSessionId && s.status === "in-progress" &&
-        s.userId === userId && s.name === name
+        s.sessionId === activeSessionId && s.status === "in-progress"
     );
 
     if (existing) return { sessionId: existing.sessionId };
 
     const session = {
         sessionId: `session-${randomUUID()}`,
-        userId,
-        name,
+        userId: 1, name: "Student",
         startedAt: new Date().toISOString(),
-        submittedAt: null,
-        status: "in-progress",
+        submittedAt: null, status: "in-progress",
         attempted: 0, correct: 0, wrong: 0, answers: []
     };
 
@@ -109,62 +107,51 @@ ipcMain.handle("create-exam-session", async () => {
     return { sessionId: session.sessionId };
 });
 
-ipcMain.handle("submit-exam", async (_event, submission) => {
+ipcMain.handle("submit-exam", async (_e, submission) => {
+    if (!submission || typeof submission.sessionId !== "string" ||
+        !Array.isArray(submission.answers))
+        throw new Error("Invalid submission.");
+
     const [questions, sessions] = await Promise.all([
         readQuestions(), readSessions()
     ]);
-
-    const session = sessions.find(s =>
-        s.sessionId === submission?.sessionId
-    );
-
+    const session = sessions.find(s => s.sessionId === submission.sessionId);
     if (!session) throw new Error("Session not found.");
 
-    if (session.status === "submitted") {
+    if (session.status === "submitted")
         return {
             attempted: session.attempted, correct: session.correct,
             wrong: session.wrong, total: questions.length
         };
-    }
-
-    if (session.status !== "in-progress" ||
-        !Array.isArray(submission.answers)) {
-        throw new Error("Invalid submission.");
-    }
+    if (session.status !== "in-progress") throw new Error("Invalid session.");
 
     const submitted = new Map();
-
     for (const a of submission.answers) {
-        if (!a || submitted.has(a.questionId)) {
+        if (!a || !["string", "number"].includes(typeof a.questionId) ||
+            submitted.has(a.questionId))
             throw new Error("Invalid or duplicate answer.");
-        }
         submitted.set(a.questionId, a.selectedAnswer);
     }
 
-    let attempted = 0, correct = 0;
+    if ([...submitted.keys()].some(id => !questions.some(q => q.id === id)))
+        throw new Error("Unknown question.");
 
+    let attempted = 0, correct = 0;
     session.answers = questions.map(q => {
-        const selectedAnswer = submitted.has(q.id)
-            ? submitted.get(q.id) : null;
+        const selectedAnswer = submitted.has(q.id) ? submitted.get(q.id) : null;
 
         if (selectedAnswer !== null &&
-            (!Number.isInteger(selectedAnswer) ||
-             selectedAnswer < 0 || selectedAnswer >= q.options.length)) {
+            (!Number.isInteger(selectedAnswer) || selectedAnswer < 0 ||
+             selectedAnswer >= q.options.length))
             throw new Error("Invalid answer option.");
-        }
 
         const isCorrect = selectedAnswer !== null &&
             selectedAnswer === q.correctAnswer;
-
         if (selectedAnswer !== null) attempted++;
         if (isCorrect) correct++;
 
         return { questionId: q.id, selectedAnswer, correct: isCorrect };
     });
-
-    if ([...submitted.keys()].some(id => !questions.some(q => q.id === id))) {
-        throw new Error("Unknown question.");
-    }
 
     Object.assign(session, {
         attempted, correct, wrong: attempted - correct,
@@ -173,26 +160,21 @@ ipcMain.handle("submit-exam", async (_event, submission) => {
 
     await writeSessions(sessions);
     if (activeSessionId === session.sessionId) activeSessionId = null;
-
     return { attempted, correct, wrong: attempted - correct, total: questions.length };
 });
 
 ipcMain.handle("start-timer", () => {
     if (timer || cameraTimer) return true;
-    startTimestamp = Date.now();
+    startTime = Date.now();
 
     timer = setInterval(() => {
-        if (electronWindow && !electronWindow.isDestroyed()) {
-            electronWindow.webContents.send(
-                "timer", (Date.now() - startTimestamp) / 1000
-            );
-        }
+        if (win && !win.isDestroyed())
+            win.webContents.send("timer", (Date.now() - startTime) / 1000);
     }, 1000);
 
     cameraTimer = setInterval(() => {
-        if (electronWindow && !electronWindow.isDestroyed()) {
-            electronWindow.webContents.send("camera-shot");
-        }
+        if (win && !win.isDestroyed())
+            win.webContents.send("camera-shot");
     }, 5000);
 
     return true;
@@ -203,21 +185,19 @@ ipcMain.handle("stop-timer", () => {
     return true;
 });
 
-ipcMain.handle("store-camera-snap-image-on-disk", async (_event, data) => {
-    if (!(data instanceof ArrayBuffer) && !ArrayBuffer.isView(data)) {
+ipcMain.handle("store-camera-snap-image-on-disk", async (_e, bytes) => {
+    if (!(bytes instanceof ArrayBuffer) && !ArrayBuffer.isView(bytes))
         throw new Error("Invalid snapshot data.");
-    }
 
     await fs.promises.writeFile(
-        path.join(storageFolder, `${Date.now()}.jpg`), Buffer.from(data)
+        path.join(storageFolder, `${Date.now()}.jpg`), Buffer.from(bytes)
     );
     return true;
 });
 
 app.whenReady().then(createWindow);
 app.on("before-quit", () => {
+    quitConfirmationOpen = false;
     stopMonitoring();
-    if (electronWindow && !electronWindow.isDestroyed() && electronWindow.isKiosk()) {
-        electronWindow.setKiosk(false);
-    }
+    if (win && !win.isDestroyed() && win.isKiosk()) win.setKiosk(false);
 });

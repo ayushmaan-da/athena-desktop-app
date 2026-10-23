@@ -320,6 +320,7 @@ body {
   max-height: 100%;
   overflow-y: auto;
   padding: 28px;
+  border: 1px solid #e2e8f0;
   border-radius: 16px;
   background: #ffffff;
   box-shadow: 0 20px 50px rgba(15, 23, 42, 0.2);
@@ -345,13 +346,59 @@ body {
 
 .exam-rules-overlay {
   position: absolute;
-  inset: 68px 20px 84px;
+  top: 64px;
+  right: 20px;
   z-index: 3;
+  display: flex;
+  justify-content: flex-end;
+  pointer-events: none;
+}
+
+.exam-rules-popover {
+  pointer-events: auto;
+}
+
+.quit-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
   display: grid;
   place-items: center;
-  padding: 16px;
-  border-radius: 10px;
-  background: rgba(15, 23, 42, 0.3);
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.quit-dialog {
+  width: min(100%, 440px);
+  padding: 28px;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.2);
+}
+
+.quit-dialog h2 {
+  color: #0f172a;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.quit-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.quit-no-button,
+.quit-no-button:not(:disabled) {
+  background-color: #2563eb;
+  color: #ffffff;
+}
+
+.quit-no-button:hover:not(:disabled) {
+  background-color: #1d4ed8;
 }
 
 .question-body {
@@ -532,8 +579,9 @@ body {
   }
 
   .exam-rules-overlay {
-    inset: 64px 10px 84px;
-    padding: 12px;
+    top: 64px;
+    right: 10px;
+    left: 10px;
   }
 
   .exam-rules-popover {
