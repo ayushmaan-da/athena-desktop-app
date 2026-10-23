@@ -14,21 +14,23 @@ contextBridge.exposeInMainWorld("athena", {
         }
     },
     startTimerOnMain: () => {
-        try {
-            return ipcRenderer.invoke('start-timer');
-        } catch (error) {
-            throw "error";
-        }
+        return ipcRenderer.invoke('start-timer');
     },
+    stopTimerOnMain: () => ipcRenderer.invoke('stop-timer'),
+    setExamKioskOnMain: (enabled) => ipcRenderer.invoke('set-exam-kiosk', enabled),
+    loadExamQuestions: () => ipcRenderer.invoke('load-exam-questions'),
+    createExamSession: (student) => ipcRenderer.invoke('create-exam-session', student),
+    submitExam: (submission) => ipcRenderer.invoke('submit-exam', submission),
 
     // New Preload Functions
 
     // Functions related to capturing camera snaps of user
     registerListenerForCameraSnapFromMain: (callback) => {
-        ipcRenderer.on('camera-shot', callback);
+        const fn = () => callback();
+        ipcRenderer.on('camera-shot', fn);
 
         return () => {
-            ipcRenderer.removeListener('camera-shot', callback);
+            ipcRenderer.removeListener('camera-shot', fn);
         }
     },
 
@@ -36,12 +38,4 @@ contextBridge.exposeInMainWorld("athena", {
         return ipcRenderer.invoke('store-camera-snap-image-on-disk', data);
     },
 
-    selectStorageFolder: async () => {
-        return await ipcRenderer.invoke('select-storage-folder');
-    },
-
-    // Functions related to showing Contest Rules in a new Dialog
-    showRules: () => {
-        ipcRenderer.send("show-rules");
-    }
 })

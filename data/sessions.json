@@ -82,5 +82,79 @@
     "correct": 0,
     "wrong": 0,
     "answers": []
+  },
+  {
+    "sessionId": "session-6d25764a-402e-445f-8976-6457a9677b11",
+    "userId": 1,
+    "name": "Student",
+    "startedAt": "2026-10-23T16:32:15.375Z",
+    "submittedAt": "2026-10-23T16:32:47.688Z",
+    "status": "submitted",
+    "attempted": 5,
+    "correct": 5,
+    "wrong": 0,
+    "answers": [
+      {
+        "questionId": 1,
+        "selectedAnswer": 1,
+        "correct": true
+      },
+      {
+        "questionId": 2,
+        "selectedAnswer": 0,
+        "correct": true
+      },
+      {
+        "questionId": 3,
+        "selectedAnswer": 1,
+        "correct": true
+      },
+      {
+        "questionId": 4,
+        "selectedAnswer": 0,
+        "correct": true
+      },
+      {
+        "questionId": 5,
+        "selectedAnswer": 1,
+        "correct": true
+      }
+    ]
+  },
+  {
+    "sessionId": "session-f692eedc-44f4-4a58-8cf4-0dbcf9c86fd3",
+    "userId": 1,
+    "name": "Student",
+    "startedAt": "2026-10-23T16:40:23.161Z",
+    "submittedAt": null,
+    "status": "in-progress",
+    "attempted": 0,
+    "correct": 0,
+    "wrong": 0,
+    "answers": []
+  },
+  {
+    "sessionId": "session-85b4022f-9e35-4c86-bf3d-6b0ff545a191",
+    "userId": 1,
+    "name": "Student",
+    "startedAt": "2026-10-23T16:42:28.285Z",
+    "submittedAt": null,
+    "status": "in-progress",
+    "attempted": 0,
+    "correct": 0,
+    "wrong": 0,
+    "answers": []
+  },
+  {
+    "sessionId": "session-e20de42e-70f5-446a-a83a-e47583ea07fa",
+    "userId": 1,
+    "name": "Student",
+    "startedAt": "2026-10-23T16:47:17.095Z",
+    "submittedAt": null,
+    "status": "in-progress",
+    "attempted": 0,
+    "correct": 0,
+    "wrong": 0,
+    "answers": []
   }
 ]
