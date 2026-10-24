@@ -8,13 +8,18 @@ import fs from "fs";
 
 let win, startTime, timer, cameraTimer, activeSessionId = null;
 let quitConfirmationOpen = false;
-let storageFolder = path.join(import.meta.dirname, "user-camera-snap");
-
-const data = path.resolve(import.meta.dirname, "../data");
-const questionsFile = path.join(data, "questions.json");
-const sessionsFile = path.join(data, "sessions.json");
-
+const storageFolder = path.join(app.getPath("userData"), "user-camera-snap");
 fs.mkdirSync(storageFolder, { recursive: true });
+
+const data = path.join(import.meta.dirname, "../data");
+const questionsFile = path.join(data, "questions.json");
+const sessionsFile = path.join(app.getPath("userData"), "sessions.json");
+
+console.log("User data directory:", app.getPath("userData"));
+console.log("Snapshot directory:", storageFolder);
+console.log("Sessions file:", sessionsFile);
+
+
 
 const readJSON = async (file, fallback) => {
     try {
@@ -24,6 +29,9 @@ const readJSON = async (file, fallback) => {
         throw e;
     }
 };
+if (!fs.existsSync(sessionsFile)) {
+    fs.writeFileSync(sessionsFile, "[]");
+}
 
 const readQuestions = () => readJSON(questionsFile);
 const readSessions = () => readJSON(sessionsFile, []);
@@ -62,7 +70,11 @@ function createWindow() {
         }
     });
 
-    win.loadURL("http://localhost:5173");
+    if (app.isPackaged) {
+        win.loadFile(path.join(app.getAppPath(), "dist/index.html"));
+    } else {
+        win.loadURL("http://localhost:5173");
+    }
 }
 
 ipcMain.handle("set-exam-kiosk", (_e, enabled) => {

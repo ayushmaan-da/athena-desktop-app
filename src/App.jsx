@@ -223,7 +223,7 @@ function App() {
   const attemptedCount = Object.keys(answers).length;
 
   return (
-    <div className="page-container">
+    <div className={`page-container${screen === 'exam' ? ' exam-active' : ''}`}>
       {screen === 'setup' && <>
         <header className="header-section">
           <h1>Athena</h1>
@@ -327,14 +327,16 @@ function App() {
           </div>
 
           <div className="question-card-footer">
-            <button className="btn exam-nav-button" disabled={currentQuestionIndex === 0 || submitting}
-              onClick={() => setCurrentQuestionIndex(i => i - 1)}>Previous</button>
             <p className="answered-counter" aria-live="polite">{attemptedCount} of {questions.length} answered</p>
-            {currentQuestionIndex < questions.length - 1
-              ? <button className="btn exam-nav-button" disabled={submitting}
-                  onClick={() => setCurrentQuestionIndex(i => i + 1)}>Next</button>
-              : <span className="question-footer-spacer" />}
           </div>
+        </div>
+        <div className="exam-fixed-navigation">
+          <button className="btn exam-nav-button" disabled={currentQuestionIndex === 0 || submitting}
+            onClick={() => setCurrentQuestionIndex(i => i - 1)}>Previous</button>
+          {currentQuestionIndex < questions.length - 1 && (
+            <button className="btn exam-nav-button" disabled={submitting}
+              onClick={() => setCurrentQuestionIndex(i => i + 1)}>Next</button>
+          )}
         </div>
       </section>}
 

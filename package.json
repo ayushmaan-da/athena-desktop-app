@@ -1,15 +1,19 @@
+
 {
   "name": "athena-desktop-app",
+  "productName": "Athena Desktop App",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
+  "main": "app/app.js",
   "scripts": {
-  "dev": "vite",
-  "build": "vite build",
-  "lint": "eslint .",
-  "preview": "vite preview",
-  "electron": "electron ./app/app.js"
-},
+    "dev": "vite",
+    "build": "vite build",
+    "lint": "eslint .",
+    "preview": "vite preview",
+    "electron": "electron ./app/app.js",
+    "dist": "npm run build && electron-builder --mac dmg"
+  },
   "dependencies": {
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
@@ -20,10 +24,27 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
     "electron": "^45.0.0",
+    "electron-builder": "^26.15.3",
     "eslint": "^10.13.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.7",
     "globals": "^17.13.0",
     "vite": "^8.3.4"
+  },
+  "build": {
+    "appId": "com.athena.desktop",
+    "directories": {
+      "output": "release"
+    },
+   "files": [
+      "app/**/*",
+      "data/**/*",
+      "dist/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.productivity"
+    }
   }
 }
