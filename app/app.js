@@ -8,6 +8,11 @@ import fs from "fs";
 
 let win, startTime, timer, cameraTimer, activeSessionId = null;
 let quitConfirmationOpen = false;
+let refreshConfirmationOpen = false;
+let examActive = false;
+let feedbackPendingSessionId = null;
+let feedbackWriteInProgress = false;
+let approvedQuit = false;
 const storageFolder = path.join(app.getPath("userData"), "user-camera-snap");
 fs.mkdirSync(storageFolder, { recursive: true });
 
@@ -34,7 +39,19 @@ if (!fs.existsSync(sessionsFile)) {
 }
 
 const readQuestions = () => readJSON(questionsFile);
-const readSessions = () => readJSON(sessionsFile, []);
+const readSessions = async () => {
+    const sessions = await readJSON(sessionsFile, []);
+    const needsFeedbackField = sessions.some(session =>
+        !Object.hasOwn(session, "feedback")
+    );
+    if (needsFeedbackField) {
+        for (const session of sessions) {
+            if (!Object.hasOwn(session, "feedback")) session.feedback = null;
+        }
+        await writeSessions(sessions);
+    }
+    return sessions;
+};
 const writeSessions = s =>
     fs.promises.writeFile(sessionsFile, JSON.stringify(s, null, 2));
 
@@ -42,6 +59,20 @@ function stopMonitoring() {
     clearInterval(timer);
     clearInterval(cameraTimer);
     timer = cameraTimer = startTime = null;
+}
+
+function requestQuitConfirmation() {
+    if (!examActive || feedbackPendingSessionId || quitConfirmationOpen ||
+        refreshConfirmationOpen || !win || win.isDestroyed()) return;
+    quitConfirmationOpen = true;
+    win.webContents.send("quit-confirmation-requested");
+}
+
+function requestRefreshConfirmation() {
+    if (!examActive || feedbackPendingSessionId || quitConfirmationOpen ||
+        refreshConfirmationOpen || !win || win.isDestroyed()) return;
+    refreshConfirmationOpen = true;
+    win.webContents.send("refresh-confirmation-requested");
 }
 
 function createWindow() {
@@ -59,15 +90,32 @@ function createWindow() {
         win = null;
     });
 
+    win.on("close", event => {
+        if (!examActive || approvedQuit) return;
+        event.preventDefault();
+        requestQuitConfirmation();
+    });
+
     win.webContents.on("before-input-event", (event, input) => {
-        if (platform() === "darwin" && input.type === "keyDown" &&
-            input.meta && input.key.toLowerCase() === "q") {
-            event.preventDefault();
-            if (!quitConfirmationOpen && win && !win.isDestroyed()) {
-                quitConfirmationOpen = true;
-                win.webContents.send("quit-confirmation-requested");
-            }
-        }
+        if (input.type !== "keyDown" || !examActive) return;
+
+        const key = input.key.toLowerCase();
+        const escapeKey = key === "escape" || key === "esc";
+        const isMac = platform() === "darwin";
+        const modifier = isMac ? input.meta : input.control;
+        const quitShortcut = modifier && key === "q";
+        const refreshShortcut = input.key === "F5" || (modifier && key === "r");
+        const blockedShortcut = escapeKey || input.key === "F11" ||
+            (input.alt && key === "f4") || (modifier && key === "w") ||
+            (isMac && input.meta && input.control && key === "f");
+
+        if (!quitShortcut && !refreshShortcut && !blockedShortcut) return;
+        event.preventDefault();
+
+        if (feedbackPendingSessionId) return;
+        if (escapeKey) return;
+        if (quitShortcut) requestQuitConfirmation();
+        else if (refreshShortcut) requestRefreshConfirmation();
     });
 
     if (app.isPackaged) {
@@ -80,14 +128,34 @@ function createWindow() {
 ipcMain.handle("set-exam-kiosk", (_e, enabled) => {
     if (typeof enabled !== "boolean" || !win || win.isDestroyed())
         throw new Error("Invalid kiosk mode request.");
+    if (!enabled && examActive)
+        throw new Error("Cannot disable fullscreen during an active exam.");
     win.setKiosk(enabled);
     return win.isKiosk();
 });
 
 ipcMain.handle("respond-to-quit-confirmation", (_e, quit) => {
     if (typeof quit !== "boolean") throw new Error("Invalid response.");
+    if (quit && feedbackPendingSessionId)
+        throw new Error("Feedback must be submitted before quitting.");
     quitConfirmationOpen = false;
-    if (quit) app.quit();
+    if (quit) {
+        approvedQuit = true;
+        app.quit();
+    }
+    return true;
+});
+
+ipcMain.handle("respond-to-refresh-confirmation", (_e, shouldRefresh) => {
+    if (typeof shouldRefresh !== "boolean" || !refreshConfirmationOpen)
+        throw new Error("Invalid refresh response.");
+    refreshConfirmationOpen = false;
+    if (shouldRefresh) {
+        examActive = false;
+        stopMonitoring();
+        if (win && !win.isDestroyed() && win.isKiosk()) win.setKiosk(false);
+        win.webContents.reload();
+    }
     return true;
 });
 
@@ -110,7 +178,7 @@ ipcMain.handle("create-exam-session", async () => {
         userId: 1, name: "Student",
         startedAt: new Date().toISOString(),
         submittedAt: null, status: "in-progress",
-        attempted: 0, correct: 0, wrong: 0, answers: []
+        attempted: 0, correct: 0, wrong: 0, answers: [], feedback: null
     };
 
     sessions.push(session);
@@ -130,11 +198,13 @@ ipcMain.handle("submit-exam", async (_e, submission) => {
     const session = sessions.find(s => s.sessionId === submission.sessionId);
     if (!session) throw new Error("Session not found.");
 
-    if (session.status === "submitted")
+    if (session.status === "submitted") {
+        if (session.feedback == null) feedbackPendingSessionId = session.sessionId;
         return {
             attempted: session.attempted, correct: session.correct,
             wrong: session.wrong, total: questions.length
         };
+    }
     if (session.status !== "in-progress") throw new Error("Invalid session.");
 
     const submitted = new Map();
@@ -172,10 +242,43 @@ ipcMain.handle("submit-exam", async (_e, submission) => {
 
     await writeSessions(sessions);
     if (activeSessionId === session.sessionId) activeSessionId = null;
+    feedbackPendingSessionId = session.sessionId;
     return { attempted, correct, wrong: attempted - correct, total: questions.length };
 });
 
+ipcMain.handle("submit-exam-feedback", async (_e, feedback) => {
+    if (!feedback || typeof feedback.sessionId !== "string" ||
+        !Number.isInteger(feedback.rating) || feedback.rating < 1 ||
+        feedback.rating > 5)
+        throw new Error("A valid feedback rating from 1 to 5 is required.");
+    if (feedback.sessionId !== feedbackPendingSessionId)
+        throw new Error("Feedback does not match the submitted exam session.");
+    if (feedbackWriteInProgress) throw new Error("Feedback is already being saved.");
+
+    feedbackWriteInProgress = true;
+    try {
+        const sessions = await readSessions();
+        const session = sessions.find(s => s.sessionId === feedback.sessionId);
+        if (!session || session.status !== "submitted")
+            throw new Error("Submitted exam session not found.");
+        if (session.feedback != null)
+            throw new Error("Feedback has already been saved for this session.");
+
+        session.feedback = { rating: feedback.rating };
+        await writeSessions(sessions);
+
+        feedbackPendingSessionId = null;
+        examActive = false;
+        approvedQuit = true;
+        app.quit();
+        return true;
+    } finally {
+        feedbackWriteInProgress = false;
+    }
+});
+
 ipcMain.handle("start-timer", () => {
+    examActive = true;
     if (timer || cameraTimer) return true;
     startTime = Date.now();
 
@@ -208,8 +311,14 @@ ipcMain.handle("store-camera-snap-image-on-disk", async (_e, bytes) => {
 });
 
 app.whenReady().then(createWindow);
-app.on("before-quit", () => {
+app.on("before-quit", event => {
+    if (examActive && !approvedQuit) {
+        event.preventDefault();
+        requestQuitConfirmation();
+        return;
+    }
     quitConfirmationOpen = false;
+    refreshConfirmationOpen = false;
     stopMonitoring();
     if (win && !win.isDestroyed() && win.isKiosk()) win.setKiosk(false);
 });

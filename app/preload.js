@@ -25,9 +25,17 @@ contextBridge.exposeInMainWorld("athena", {
         ipcRenderer.on('quit-confirmation-requested', fn);
         return () => ipcRenderer.removeListener('quit-confirmation-requested', fn);
     },
+    respondToRefreshConfirmation: (shouldRefresh) =>
+        ipcRenderer.invoke('respond-to-refresh-confirmation', shouldRefresh),
+    registerListenerForRefreshConfirmation: (callback) => {
+        const fn = () => callback();
+        ipcRenderer.on('refresh-confirmation-requested', fn);
+        return () => ipcRenderer.removeListener('refresh-confirmation-requested', fn);
+    },
     loadExamQuestions: () => ipcRenderer.invoke('load-exam-questions'),
     createExamSession: (student) => ipcRenderer.invoke('create-exam-session', student),
     submitExam: (submission) => ipcRenderer.invoke('submit-exam', submission),
+    submitExamFeedback: (feedback) => ipcRenderer.invoke('submit-exam-feedback', feedback),
 
     // New Preload Functions
 

@@ -27,6 +27,8 @@ function App() {
   const [rulesAccepted, setRulesAccepted] = useState(false);
   const [examRulesOpen, setExamRulesOpen] = useState(false);
   const [quitConfirmationOpen, setQuitConfirmationOpen] = useState(false);
+  const [refreshConfirmationOpen, setRefreshConfirmationOpen] = useState(false);
+  const [submitConfirmationOpen, setSubmitConfirmationOpen] = useState(false);
   const [timer, setTimer] = useState(0);
   const [screen, setScreen] = useState('setup');
   const [questions, setQuestions] = useState([]);
@@ -36,19 +38,28 @@ function App() {
   const [result, setResult] = useState(null);
   const [starting, setStarting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [feedbackRating, setFeedbackRating] = useState(0);
+  const [feedbackSaving, setFeedbackSaving] = useState(false);
+  const [feedbackError, setFeedbackError] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
 
   const videoRef = useRef(null);
   const cameraStreamRef = useRef(null);
   const startGuardRef = useRef(false);
   const submitGuardRef = useRef(false);
+  const feedbackGuardRef = useRef(false);
   const snapshotInProgressRef = useRef(false);
-  const kioskModeRef = useRef(false);
   const examRulesRef = useRef(null);
 
   useEffect(() => {
     return window.athena.registerListenerForQuitConfirmation(
       () => setQuitConfirmationOpen(true)
+    );
+  }, []);
+
+  useEffect(() => {
+    return window.athena.registerListenerForRefreshConfirmation(
+      () => setRefreshConfirmationOpen(true)
     );
   }, []);
 
@@ -85,29 +96,13 @@ function App() {
     if (videoRef.current) videoRef.current.srcObject = null;
   }
 
-  async function stopKiosk() {
-    if (!kioskModeRef.current) return;
-    kioskModeRef.current = false;
-    await window.athena.setExamKioskOnMain(false);
-  }
-
   useEffect(() => {
     const removeTimer = window.athena.registerListenerForTimerTickFromMain(setTimer);
     const removeCamera = window.athena.registerListenerForCameraSnapFromMain(saveVideoScreenShots);
 
-    const syncFullscreen = () => {
-      const enabled = Boolean(document.fullscreenElement);
-      setFullScreen(enabled);
-      if (!enabled) stopKiosk().catch(console.error);
-    };
-
-    syncFullscreen();
-    document.addEventListener('fullscreenchange', syncFullscreen);
-
     return () => {
       removeTimer();
       removeCamera();
-      document.removeEventListener('fullscreenchange', syncFullscreen);
       stopCamera();
       window.athena.stopTimerOnMain().catch(console.error);
     };
@@ -129,10 +124,8 @@ function App() {
   async function enableFullScreen() {
     setErrorMessage('');
     try {
-      await document.documentElement.requestFullscreen();
-      setFullScreen(Boolean(document.fullscreenElement));
-      await window.athena.setExamKioskOnMain(true);
-      kioskModeRef.current = true;
+      const enabled = await window.athena.setExamKioskOnMain(true);
+      setFullScreen(enabled);
     } catch (error) {
       console.error(error);
       setErrorMessage('Cannot enable fullscreen. Try again and allow fullscreen mode.');
@@ -187,13 +180,6 @@ function App() {
       stopCamera();
 
       try {
-        await stopKiosk();
-      } catch (error) {
-        console.error(error);
-        setErrorMessage('The exam was submitted, but kiosk mode could not be exited cleanly.');
-      }
-
-      try {
         await window.athena.stopTimerOnMain();
       } catch (error) {
         console.error(error);
@@ -205,6 +191,40 @@ function App() {
     } finally {
       setSubmitting(false);
       submitGuardRef.current = false;
+    }
+  }
+
+  function requestSubmitConfirmation() {
+    if (!submitting && !submitGuardRef.current && !submitConfirmationOpen) {
+      setSubmitConfirmationOpen(true);
+    }
+  }
+
+  async function respondToRefresh(shouldRefresh) {
+    try {
+      await window.athena.respondToRefreshConfirmation(shouldRefresh);
+      setRefreshConfirmationOpen(false);
+    } catch (error) {
+      console.error(error);
+      setRefreshConfirmationOpen(false);
+      setErrorMessage('Could not process the refresh request. Please try again.');
+    }
+  }
+
+  async function submitFeedback() {
+    if (!feedbackRating || feedbackGuardRef.current || !sessionId) return;
+    feedbackGuardRef.current = true;
+    setFeedbackSaving(true);
+    setFeedbackError('');
+
+    try {
+      await window.athena.submitExamFeedback({ sessionId, rating: feedbackRating });
+    } catch (error) {
+      console.error(error);
+      setFeedbackError(`Could not save feedback: ${error.message || error}`);
+    } finally {
+      setFeedbackSaving(false);
+      feedbackGuardRef.current = false;
     }
   }
 
@@ -294,16 +314,18 @@ function App() {
             <h1>Exam</h1>
             <p>Question {currentQuestionIndex + 1} of {questions.length}</p>
           </div>
-          <div className="exam-progress"><span>{formatTime(timer)}</span></div>
+          <div className="exam-header-actions">
+            <div className="exam-progress"><span>{formatTime(timer)}</span></div>
+            <button className="btn submit-exam-button" disabled={submitting} onClick={requestSubmitConfirmation}>
+              {submitting ? 'Submitting…' : 'Submit Exam'}
+            </button>
+          </div>
         </header>
 
         <div className="card-container question-card">
           <div className="question-card-topbar">
             <button className="exam-rules-info-button" type="button" aria-label="Show exam rules"
               aria-expanded={examRulesOpen} onClick={() => setExamRulesOpen(!examRulesOpen)}>i</button>
-            <button className="btn submit-exam-button" disabled={submitting} onClick={submitExam}>
-              {submitting ? 'Submitting…' : 'Submit Exam'}
-            </button>
           </div>
 
           {examRulesOpen && <div className="exam-rules-overlay">
@@ -350,6 +372,32 @@ function App() {
         </section>
       </div>}
 
+      {refreshConfirmationOpen && <div className="quit-dialog-backdrop">
+        <section className="quit-dialog" role="alertdialog" aria-modal="true" aria-labelledby="refresh-title">
+          <h2 id="refresh-title">Are you sure you want to refresh the exam?</h2>
+          <div className="quit-dialog-actions">
+            <button className="btn quit-no-button" onClick={() => respondToRefresh(false)}>No</button>
+            <button className="btn exam-nav-button" onClick={() => respondToRefresh(true)}>Yes</button>
+          </div>
+        </section>
+      </div>}
+
+      {submitConfirmationOpen && <div className="quit-dialog-backdrop"
+        onClick={event => {
+          if (event.target === event.currentTarget) setSubmitConfirmationOpen(false);
+        }}>
+        <section className="quit-dialog" role="alertdialog" aria-modal="true" aria-labelledby="submit-title">
+          <h2 id="submit-title">Are you sure you want to submit the exam?</h2>
+          <div className="quit-dialog-actions">
+            <button className="btn quit-no-button" onClick={() => setSubmitConfirmationOpen(false)}>No</button>
+            <button className="btn exam-nav-button" disabled={submitting} onClick={async () => {
+              setSubmitConfirmationOpen(false);
+              await submitExam();
+            }}>Yes</button>
+          </div>
+        </section>
+      </div>}
+
       {screen === 'submitted' && result && <section className="result-screen">
         <div className="card-container">
           <p className="question-count">Exam submitted</p>
@@ -358,6 +406,30 @@ function App() {
           <p>{result.attempted} attempted · {result.correct} correct · {result.wrong} wrong</p>
         </div>
       </section>}
+
+      {screen === 'submitted' && result && <div className="quit-dialog-backdrop">
+        <section className="quit-dialog feedback-dialog" role="dialog" aria-modal="true"
+          aria-labelledby="feedback-title">
+          <h2 id="feedback-title">Rate Your Exam Experience</h2>
+          <p className="feedback-prompt">Select a rating from 1 to 5 stars.</p>
+          <div className="feedback-stars" role="radiogroup" aria-label="Exam experience rating"
+            aria-required="true">
+            {[1, 2, 3, 4, 5].map(rating => (
+              <button key={rating} type="button" role="radio" aria-checked={feedbackRating === rating}
+                aria-label={`${rating} ${rating === 1 ? 'star' : 'stars'}`}
+                className={`feedback-star${feedbackRating >= rating ? ' selected' : ''}`}
+                onClick={() => setFeedbackRating(rating)}>★</button>
+            ))}
+          </div>
+          {feedbackError && <p className="feedback-error" role="alert">{feedbackError}</p>}
+          <div className="quit-dialog-actions">
+            <button className="btn submit-exam-button" disabled={!feedbackRating || feedbackSaving}
+              onClick={submitFeedback}>
+              {feedbackSaving ? 'Saving…' : 'Submit Feedback & Quit'}
+            </button>
+          </div>
+        </section>
+      </div>}
 
       {errorMessage && <p className="error-message" role="alert">{errorMessage}</p>}
     </div>
